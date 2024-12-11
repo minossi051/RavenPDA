@@ -1,147 +1,160 @@
-#funcionalidades: 
-#gráfico de pizza da percentagem de PoPs mapeados X
-#infográfico em barras:
-                    #Número de incidentes por POP durante 2024 X
-                    #Data exata do incidente ao clicar em algum deles 
-#planilha de serviços executados desde 23/09/2024
-#Operação Verão (Relação dos splits)
-#Operação Lítio (Relação dos UPS)
-
-
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-# Caminho do arquivo Excel
 base_dados = r"C:\Users\vicenzo-minossi\OneDrive - Governo do Estado do Rio Grande do Sul\POPS\procergs-diop-dif-pir\DIF-PIR Execução POPS.xlsx"
+import pandas as pd
+import folium
+import streamlit as st
+from folium.plugins import MarkerCluster
+from streamlit_folium import folium_static
+from PIL import Image
 
-st.title('POPS - Status de Serviços')
-
+st.title('POPS - Dados de serviço')
+# Dashboard destinado à apresentação no dia 16/12
 # Nome da aba específica a ser carregada
-aba_alvo = 'Panorama POPS RS'
 
-# Carregar os dados da aba especificada
+aba_splits = 'Instalações Splits NOV.DEZ2024'
+aba_coordenadas = 'Panorama POPS RS'
+
+# Carrega os dados da aba específica
 try:
-    df = pd.read_excel(base_dados, sheet_name=aba_alvo, engine='openpyxl')  # Especifica a aba e usa openpyxl
+    df_splits = pd.read_excel(base_dados, sheet_name=aba_splits, engine='openpyxl')
 except Exception as e:
-    st.error(f"Ocorreu um erro ao carregar os dados da aba '{aba_alvo}': {e}")
+    st.error(f"Ocorreu um erro ao carregar os dados da aba '{aba_splits}': {e}")
     st.stop()
 
-# Verificar se os dados foram carregados corretamente
-st.write(f"Informações '{aba_alvo}'")
-st.dataframe(df)
-
-# Verificar e corrigir tipos de dados
-if 'Última vistoria' in df.columns:
+# Progresso de instalação dos PoPs
+#mostrar apenas as colunas que contém nenhum valor vazio
+#mostrar somente os splits instalados
+#mostra PoP + Situação + Data da instalação
+if 'Situação' in df_splits.columns:
     try:
-        # Converter a coluna de datas, tratando valores inválidos
-        df['Última vistoria'] = pd.to_datetime(df['Última vistoria'], errors='coerce')
-        st.write("Coluna 'Última vistoria' convertida para formato de data.")
+        # Filtra os splits com situação 'OK' ou 'Verificar dreno'
+        coluna_situacao = 'Situação' 
+        valores_objetivo = ['OK','Verificar dreno']
+
+        df_splits_filtrado = df_splits[df_splits['Situação'].isin(['OK', 'Verificar dreno'])]
+        df_splits_filtrado = df_splits[df_splits[coluna_situacao].isin(valores_objetivo)]
+        total_splits_filtrado = len(df_splits_filtrado)
+
+        total_splits = len(df_splits)
+
+        # Calcula a porcentagem de splits instalados
+        porcentagem_splits = (total_splits_filtrado / total_splits) * 100    if total_splits > 0 else 0
+
+        # Exibe as métricas
+        st.subheader("Resumo de Splits Instalados")
+        st.metric(f"Total de splits instalados", f"{total_splits_filtrado} de {total_splits} ({porcentagem_splits:.2f}%)")
+
+        # Exibe a barra de progresso
+        st.progress(porcentagem_splits / 100)  # A barra de progresso é uma porcentagem (de 0 a 1)
+
     except Exception as e:
-        st.error(f"Erro ao converter 'Última vistoria' para data: {e}")
+        st.error(f"Erro ao filtrar e contar splits instalados: {e}")
 
-# Tratar células vazias
-df.fillna("Não informado", inplace=True)
+    # Exibe o dataframe com o progresso de instalação
+    colunas_progresso = ['POP', 'Situação','Data da instalação','Potência (BTUs)']
+    df_progresso = df_splits_filtrado[colunas_progresso]
+    df_progresso = df_splits_filtrado.dropna(axis=1, how='any')
+    st.dataframe(df_progresso)
 
-# Filtrar e contar serviços em andamento
-coluna_status = 'Serviços em andamento (Inserir SOL, se houver)'
-coluna_nome = 'Nome POP'
-
-if coluna_status in df.columns and coluna_nome in df.columns:
-    try:
-        # Identificar serviços em andamento
-        servico_andamento = df[
-            (df[coluna_status] != "Não informado") & 
-            (~df[coluna_status].str.contains('Sem serviços em andamento', case=False, na=False))
-        ]
-        
-        # Selecionar apenas as colunas desejadas
-        resultado_filtrado = servico_andamento[[coluna_nome, coluna_status]]
-        total_andamento = len(resultado_filtrado)
-        
-        st.subheader(f"Total de POPs com serviços em andamento: {total_andamento}")
-        st.dataframe(resultado_filtrado)
-    except Exception as e:
-        st.error(f"Erro ao filtrar os serviços em andamento: {e}")
 else:
-    st.error(f"Uma ou ambas as colunas '{coluna_status}' e '{coluna_nome}' não foram encontradas na aba '{aba_alvo}'.")
 
-coluna_rack = 'Rack mapeado?'
+    st.warning("A coluna 'Situação' não está presente nos dados de splits.")
 
-if coluna_rack in df.columns:
-    try:
-        # Contar os valores 'Sim' e 'Não'
-        contagem = df[coluna_rack].value_counts()
 
-        # Garantir que valores ausentes ('Sim' ou 'Não') não causem erro
-        sim = contagem.get('Sim', 0)
-        nao = contagem.get('Não', 0)
-
-        total = sim + nao
-        if total > 0:
-            porcentagem_sim = (sim / total) * 100
-            porcentagem_nao = (nao / total) * 100
-
-            st.subheader("Porcentagem de Racks Mapeados")
-            st.write(f"Total de POPs: {total}")
-            st.write(f"Racks Mapeados: {porcentagem_sim:.2f}% ({sim})")
-            st.write(f"Racks Não Mapeados: {porcentagem_nao:.2f}% ({nao})")
-
-            # Gráfico de pizza
-            st.write("Distribuição de Racks Mapeados:")
-            st.pyplot(pd.DataFrame(
-                {'Status': ['Sim', 'Não'], 'Quantidade': [sim, nao]}
-            ).set_index('Status').plot.pie(
-                y='Quantidade', autopct='%1.1f%%', figsize=(6, 6), legend=False
-            ).figure)
-        else:
-            st.warning("Não há informações suficientes para calcular os racks mapeados.")
-    except Exception as e:
-        st.error(f"Erro ao calcular racks mapeados: {e}")
+#datas das conclusões das instalaões
+coluna_data = 'Data da instalação'
+if coluna_data in df_splits.columns:
+    df_data = df_splits[df_splits[coluna_data].notna()]
+    
+    st.subheader("Datas de Conclusão das Instalações")
+    st.dataframe(df_data[['POP', coluna_data]]) 
 else:
-    st.error(f"A coluna '{coluna_rack}' não foi encontrada na aba '{aba_alvo}'.")
+    st.warning(f"A coluna '{coluna_data}' não está presente nos dados.")
 
 
+#relção de POP - Situação do split - origem
+st.subheader('Situação dos Splits')
 
-# Nome da aba específica a ser carregada
-aba_incidentes = 'Lista de incidentes'
+# Colunas de interesse
+colunas_status = ['POP', 'Motivo da instalação', 'Origem']
 
-# Carregar os dados da aba especificada
+# Verifica se todas as colunas de interesse estão presentes no dataframe
+colunas_existentes = [col for col in colunas_status if col in df_splits.columns]
+
+if colunas_existentes:
+    # Filtra as linhas onde as colunas selecionadas não possuem valores vazios
+    df_status_filtrado = df_splits[colunas_existentes].dropna(how='any')
+
+    # Exibe o dataframe filtrado no dashboard
+    st.dataframe(df_status_filtrado)
+else:
+    st.warning(f"As colunas {colunas_status} não estão presentes no dataframe.")
+
+
+# Cronograma de instalações
+st.subheader("Próximas instalações agendadas")
+if 'Situação' in df_splits.columns:
+    # Filtra os POPs com 'Instalação agendada' na coluna 'Situação'
+    df_agendados = df_splits[df_splits['Situação'].str.contains('Instalação agendada', na=False)]
+    
+    # Exibe a tabela filtrada com a data extraída
+    colunas_agendadas = ['POP', 'Situação']
+    st.dataframe(df_agendados[colunas_agendadas])
+# Mapa com roteiro das instalações
+st.subheader("Mapa Roteiro das Instalações")
+roteiro_inst = ['VIAMAO', 'NOVO HAMBURGO', 'TAQUARA', 'ALEGRETE', 'CARAZINHO',
+                'ERECHIM', 'PALMEIRA DAS MISSOES', 'SANTA ROSA']
+
 try:
-    df_incidentes = pd.read_excel(base_dados, sheet_name=aba_incidentes, engine='openpyxl')
+    df_coord = pd.read_excel(
+        base_dados,
+        sheet_name=aba_coordenadas,
+        usecols=['Município', 'Latitude', 'Longitude'],
+        engine='openpyxl'
+    )
+
+    # Filtrar somente as cidades do roteiro
+    df_coord_filtrado = df_coord[df_coord['Município'].str.upper().isin(roteiro_inst)]
+
+    # Converter Latitude e Longitude para valores numéricos
+    df_coord_filtrado['Latitude'] = pd.to_numeric(df_coord_filtrado['Latitude'], errors='coerce')
+    df_coord_filtrado['Longitude'] = pd.to_numeric(df_coord_filtrado['Longitude'], errors='coerce')
+
+    # Verificar se há coordenadas válidas
+    if df_coord_filtrado[['Latitude', 'Longitude']].isnull().any().any():
+        st.error("Algumas coordenadas possuem valores inválidos. Verifique os dados.")
+    else:
+        # Criar o mapa
+        mapa = folium.Map(location=[df_coord_filtrado['Latitude'].mean(),
+                                    df_coord_filtrado['Longitude'].mean()],
+                          zoom_start=6)
+
+        # Adicionar marcadores no mapa
+        marker_cluster = MarkerCluster().add_to(mapa)
+        for _, row in df_coord_filtrado.iterrows():
+            folium.Marker(
+                location=[row['Latitude'], row['Longitude']],
+                popup=row['Município'],
+                icon=folium.Icon(color='blue')
+            ).add_to(marker_cluster)
+
+        # Traçar o caminho entre as cidades na ordem específica
+        roteiro_ordenado = df_coord_filtrado.set_index('Município').loc[roteiro_inst]
+        caminho = [(row['Latitude'], row['Longitude']) for _, row in roteiro_ordenado.iterrows()]
+        folium.PolyLine(caminho, color='red', weight=2.5, opacity=1).add_to(mapa)
+
+        # Exibir o mapa no Streamlit
+        st.write("Mapa dos pontos de instalação pendentes")
+        folium_static(mapa)
+
 except Exception as e:
-    st.error(f"Ocorreu um erro ao carregar os dados da aba '{aba_incidentes}': {e}")
-    st.stop()
+    st.error(f"Erro ao carregar ou processar as coordenadas: {e}")
 
-# Verificar se os dados foram carregados corretamente
-st.write(f"Visualizando os dados da aba '{aba_incidentes}'")
-st.dataframe(df_incidentes)
+caminho_imagem = r"C:\\Users\\vicenzo-minossi\\Desktop\\16.12\\horas_de_viagem.png"
 
-# Garantir que a coluna 'Incidente' seja tratada como string
-df_incidentes['Incidente'] = df_incidentes['Incidente'].astype(str)
-Resumo = df_incidentes['Resumo'].astype(str)
-
-# Garantir que a coluna 'Data de abertura' esteja no formato datetime
-if 'Data de abertura' in df_incidentes.columns:
-    try:
-        df_incidentes['Data de abertura'] = pd.to_datetime(df_incidentes['Data de abertura'], errors='coerce')
-        st.write("Coluna 'Data de abertura' convertida para formato de data.")
-    except Exception as e:
-        st.error(f"Erro ao converter 'Data de abertura' para data: {e}")
-
-# Filtrar os incidentes entre 2022 e 2024
-df_incidentes_filtrados = df_incidentes[(df_incidentes['Data de abertura'] >= '2024-01-01') &
-                                         (df_incidentes['Data de abertura'] <= '2024-12-31')]
-                                           
-
-# Verificar se há a coluna 'POP' e 'Serviço afetado' no dataframe
-if 'Serviço afetado' in df_incidentes.columns:
-    # Contar os incidentes por POP
-    incidentes_por_pop = df_incidentes_filtrados.groupby('Serviço afetado').size().reset_index(name='Quantidade de Incidentes')
-    
-    # Exibir gráfico de barras
-    fig = px.bar(incidentes_por_pop, x='Serviço afetado', y='Quantidade de Incidentes',
-                 title='Quantidade de Incidentes por POP (Janeiro - Dezembro (2024))', labels={'Serviço afetado': 'POP', 'Quantidade de Incidentes': 'Número de Incidentes'})
-    
-    st.plotly_chart(fig)
-else:
-    st.error("A coluna 'Serviço afetado' não foi encontrada nos dados.")
+st.subheader('Itinerário planejado')
+# Carrega e exibe a imagem
+try:
+    imagem = Image.open(caminho_imagem)
+    st.image(imagem, caption="Itinerário planejado pela chefia", use_container_width=True)
+except Exception as e:
+    st.error(f"Erro ao carregar a imagem: {e}")
